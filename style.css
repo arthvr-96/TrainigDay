@@ -277,3 +277,12 @@ button.ex:active { transform: scale(.985); }
 .checks input { width: 20px; height: 20px; accent-color: var(--blue); }
 .sheet .btn-row { margin-top: 8px; }
 .sheet .btn-row .btn { flex: 1; }
+
+/* ===== Per-exercise stats ===== */
+.xs { padding: 12px 0; border-bottom: 1px solid var(--fill); }
+.xs:first-of-type { padding-top: 0; }
+.xs:last-child { border-bottom: 0; padding-bottom: 0; }
+.xs-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.xs-h .n { font-weight: 700; font-size: 17px; overflow-wrap: anywhere; }
+.xs-h .m { color: var(--text2); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.xs .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }

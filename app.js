@@ -75,9 +75,9 @@
     const d = parse(k), idx = dow(d), l = state.log[k];
     const done = l ? Object.keys(l.items).length : 0;
     const planned = Math.max(l ? l.total : state.plan[idx].length, done);
-    let vol = 0, sets = 0, reps = 0;
-    if (l) for (const e of Object.values(l.items)) { vol += e.sets * e.reps * e.weight; sets += e.sets; reps += e.sets * e.reps; }
-    return { k, d, idx, done, planned, vol, sets, reps, ratio: planned ? Math.min(1, done / planned) : 0 };
+    let sets = 0, reps = 0;
+    if (l) for (const e of Object.values(l.items)) { sets += e.sets; reps += e.sets * e.reps; }
+    return { k, d, idx, done, planned, sets, reps, ratio: planned ? Math.min(1, done / planned) : 0 };
   }
   function status(k) {
     const i = dayInfo(k), t = today(), diff = i.d - t;
@@ -95,7 +95,7 @@
       days,
       planned: days.filter((d) => d.planned > 0).length,
       done: days.filter((d) => d.planned > 0 && d.ratio >= 1).length,
-      vol: sum((d) => d.vol), sets: sum((d) => d.sets), reps: sum((d) => d.reps), exDone: sum((d) => d.done),
+      sets: sum((d) => d.sets), reps: sum((d) => d.reps), exDone: sum((d) => d.done),
     };
   }
   function streak() {
@@ -110,20 +110,23 @@
     return n;
   }
   function totals() {
-    let workouts = 0, vol = 0, sets = 0;
+    let workouts = 0, exCount = 0;
     const byEx = {};
     for (const k of Object.keys(state.log)) {
       const i = dayInfo(k);
       if (i.planned > 0 && i.ratio >= 1) workouts++;
-      vol += i.vol; sets += i.sets;
       for (const e of Object.values(state.log[k].items)) {
+        exCount++;
         const id = e.name.trim().toLowerCase();
-        const o = byEx[id] || (byEx[id] = { name: e.name.trim(), vol: 0, reps: 0, times: 0 });
-        o.vol += e.sets * e.reps * e.weight; o.reps += e.sets * e.reps; o.times++;
+        const o = byEx[id] || (byEx[id] = { name: e.name.trim(), reps: 0, w: {} });
+        const r = e.sets * e.reps, w = Number(e.weight) || 0;
+        o.reps += r; o.w[w] = (o.w[w] || 0) + r;
       }
     }
-    const top = Object.values(byEx).sort((a, b) => b.vol - a.vol || b.reps - a.reps).slice(0, 5);
-    return { workouts, vol, sets, top };
+    const list = Object.values(byEx)
+      .map((o) => ({ name: o.name, reps: o.reps, weights: Object.entries(o.w).map(([w, r]) => [Number(w), r]).sort((a, b) => a[0] - b[0]) }))
+      .sort((a, b) => b.reps - a.reps);
+    return { workouts, exCount, list };
   }
 
   /* ================= Шаблоны ================= */
@@ -159,16 +162,16 @@
         <div class="btn-row"><button class="btn primary" data-a="goDate" data-k="${tk}">${info.ratio >= 1 ? 'Открыть чек-лист' : 'Начать тренировку'}</button></div>`;
     }
 
-    const delta = pw.vol > 0 ? Math.round(((ws.vol - pw.vol) / pw.vol) * 100) : null;
+    const delta = pw.reps > 0 ? Math.round(((ws.reps - pw.reps) / pw.reps) * 100) : null;
     const deltaHtml = delta === null ? '' : `<div class="delta ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}% к прошлой неделе</div>`;
 
     const tiles = [
       ['var(--blue)', '🏋️', `${ws.done}<small>/ ${ws.planned}</small>`, 'Тренировок на неделе', ''],
       ['var(--orange)', '🔥', `${st}<small>${st === 1 ? 'день' : 'дн.'}</small>`, 'Серия подряд', ''],
-      ['var(--purple)', '⚖️', `${nf(ws.vol)}<small>кг</small>`, 'Тоннаж за неделю', deltaHtml],
-      ['var(--pink)', '🔁', `${nf(ws.sets)}`, 'Подходов за неделю', `<div class="delta up" style="background:none;padding:0;color:var(--text2)">${nf(ws.reps)} повторений</div>`],
+      ['var(--purple)', '🔁', `${nf(ws.reps)}`, 'Повторений за неделю', deltaHtml],
+      ['var(--pink)', '🧱', `${nf(ws.sets)}`, 'Подходов за неделю', ''],
       ['var(--green)', '✅', `${tt.workouts}`, 'Всего тренировок', ''],
-      ['var(--teal)', '🏆', `${nf(tt.vol / 1000 >= 10 ? tt.vol / 1000 : tt.vol)}<small>${tt.vol / 1000 >= 10 ? 'т' : 'кг'}</small>`, 'Поднято за всё время', ''],
+      ['var(--teal)', '💪', `${nf(tt.exCount)}`, 'Упражнений выполнено', ''],
     ].map((x, i) => `<div class="tile glass" style="animation-delay:${i * 50}ms"><div class="ic" style="background:${x[0]}">${x[1]}</div><div class="v">${x[2]}</div><div class="l">${x[3]}</div>${x[4]}</div>`).join('');
 
     // Неделя
@@ -182,12 +185,12 @@
     // Тоннаж по неделям
     const weeks = [];
     for (let i = 7; i >= 0; i--) weeks.push(weekStats(addDays(monday(t), -7 * i)));
-    const max = Math.max(1, ...weeks.map((w) => w.vol));
+    const max = Math.max(1, ...weeks.map((w) => w.reps));
     const barsHtml = weeks.map((w, i) => {
       const w0 = w.days[0].d;
       const lab = i === 7 ? 'Эта' : `${w0.getDate()} ${MONTHS[w0.getMonth()].slice(0, 3)}`;
-      return `<div class="bar-col ${i === 7 ? 'cur' : ''}"><span class="val">${w.vol ? nf(w.vol) : ''}</span>
-        <div class="bar" style="height:${Math.max(4, (w.vol / max) * 100)}%"></div><span class="lab">${lab}</span></div>`;
+      return `<div class="bar-col ${i === 7 ? 'cur' : ''}"><span class="val">${w.reps ? nf(w.reps) : ''}</span>
+        <div class="bar" style="height:${Math.max(4, (w.reps / max) * 100)}%"></div><span class="lab">${lab}</span></div>`;
     }).join('');
 
     // Тепловая карта 12 недель
@@ -198,22 +201,20 @@
       heat += `<i class="${status(k)}" title="${fmtDate(parse(k))}"></i>`;
     }
 
-    // Топ упражнений
-    const topMax = Math.max(1, ...tt.top.map((x) => (x.vol > 0 ? x.vol : x.reps)));
-    const topHtml = tt.top.length
-      ? tt.top.map((x) => `<div class="top-row"><span class="n">${esc(x.name)}</span><span class="m">${x.vol > 0 ? nf(x.vol) + ' кг' : nf(x.reps) + ' повт.'}</span>
-          <div class="track"><b style="width:${((x.vol > 0 ? x.vol : x.reps) / topMax) * 100}%"></b></div></div>`).join('')
-      : `<div class="empty"><div class="em">📊</div>Отмечайте упражнения в чек-листе — здесь появится рейтинг.</div>`;
+    // Статистика по упражнениям: сколько раз с каким весом
+    const fmtW = (w) => (w ? `${fmtNum(w)} кг` : 'свой вес');
+    const topHtml = tt.list.length
+      ? tt.list.map((x) => `<div class="xs"><div class="xs-h"><span class="n">${esc(x.name)}</span><span class="m">всего ${nf(x.reps)} раз</span></div>
+          <div class="meta">${x.weights.map(([w, r]) => `<span class="pill ${w ? 'o' : 'b'}">${nf(r)} раз · ${fmtW(w)}</span>`).join('')}</div></div>`).join('')
+      : `<div class="empty"><div class="em">📊</div>Отмечайте упражнения в чек-листе — здесь появится статистика по весам.</div>`;
 
     // Выполнение по дням недели за 4 недели
     return `${header('Главная', `${DAYS[dow(t)]}, ${fmtDate(t)}`)}
       <section class="card glass">${hero}</section>
       <section class="tiles">${tiles}</section>
       <section class="card glass"><h2>Эта неделя</h2><div class="week">${weekHtml}</div></section>
-      <div class="grid g2">
-        <section class="card glass"><h2>Тоннаж по неделям, кг</h2><div class="bars">${barsHtml}</div></section>
-        <section class="card glass"><h2>Топ упражнений</h2>${topHtml}</section>
-      </div>
+      <section class="card glass"><h2>Повторений по неделям</h2><div class="bars">${barsHtml}</div></section>
+      <section class="card glass"><h2>Статистика по упражнениям</h2>${topHtml}</section>
       <section class="card glass"><h2>Активность · 12 недель</h2><div class="heat">${heat}</div>
         <div class="legend"><span style="--c:var(--green)">выполнено</span><span style="--c:var(--orange)">частично</span><span style="--c:color-mix(in srgb,var(--red) 40%,transparent)">пропущено</span><span style="--c:var(--fill-strong)">отдых</span></div></section>
       <section class="card glass"><h2>Данные</h2>
@@ -226,7 +227,7 @@
     const idx = ui.planDay, list = state.plan[idx];
     const chips = DAYS.map((d, i) => `<button class="chip ${i === idx ? 'on' : ''}" data-a="planDay" data-d="${i}">${SHORT[i]}${state.plan[i].length ? `<em>${state.plan[i].length}</em>` : ''}</button>`).join('');
     const sets = list.reduce((a, e) => a + e.sets, 0);
-    const vol = list.reduce((a, e) => a + e.sets * e.reps * e.weight, 0);
+    const reps = list.reduce((a, e) => a + e.sets * e.reps, 0);
     const rows = list.map((e, i) => `<div class="ex"><div class="info"><div class="nm">${esc(e.name)}</div><div class="meta">${exMeta(e)}</div></div>
       <div class="row-acts">
         <button class="mini" data-a="move" data-id="${e.id}" data-dir="-1" ${i === 0 ? 'disabled style="opacity:.3"' : ''} aria-label="Выше">${ICON.up}</button>
@@ -236,7 +237,7 @@
     return `${header('План', 'Упражнения по дням недели')}
       <div class="chips">${chips}</div>
       <section class="card glass"><h2>${DAYS[idx]}</h2>
-        ${list.length ? `<div class="sum"><span><b>${list.length}</b> упражн.</span><span><b>${sets}</b> подходов</span><span><b>${nf(vol)}</b> кг тоннаж</span></div>${rows}`
+        ${list.length ? `<div class="sum"><span><b>${list.length}</b> упражн.</span><span><b>${sets}</b> подходов</span><span><b>${nf(reps)}</b> повторений</span></div>${rows}`
         : `<div class="empty"><div class="em">🗓️</div><b>День свободен</b>Добавьте упражнения или оставьте как день отдыха.</div>`}
         <div class="btn-row"><button class="btn primary" data-a="add">＋ Упражнение</button>
           ${list.length ? '<button class="btn" data-a="copy">Копировать в…</button><button class="btn danger" data-a="clearDay">Очистить</button>' : ''}</div>
@@ -268,7 +269,7 @@
       <section class="card glass">
         ${info.planned ? `<div style="display:flex;justify-content:space-between;font-weight:700"><span>Выполнено ${info.done} из ${info.planned}</span><span>${Math.round(info.ratio * 100)}%</span></div>
           <div class="progress"><b style="width:${info.ratio * 100}%"></b></div>
-          <div class="sum" style="margin:8px 0 14px"><span><b>${info.sets}</b> подходов</span><span><b>${nf(info.vol)}</b> кг</span></div>` : ''}
+          <div class="sum" style="margin:8px 0 14px"><span><b>${info.sets}</b> подходов</span><span><b>${nf(info.reps)}</b> повторений</span></div>` : ''}
         ${list.length || extra ? rows + extra
           : `<div class="empty"><div class="em">😴</div><b>День отдыха</b>На ${DAYS[idx].toLowerCase()} ничего не запланировано.</div>`}
         <div class="btn-row">
